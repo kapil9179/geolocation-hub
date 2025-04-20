@@ -6,6 +6,7 @@ function App() {
     <>
       <div>
         {/* payment history table */}
+        {/* payment history table final check */}
         <table>
           <thead>
             <th>no</th>
