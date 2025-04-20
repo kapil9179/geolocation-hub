@@ -5,6 +5,7 @@ function App() {
   return (
     <>
       <div>
+        {/* payment history table */}
         <table>
           <thead>
             <th>no</th>
