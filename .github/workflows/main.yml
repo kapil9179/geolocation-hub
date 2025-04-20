@@ -28,14 +28,27 @@ jobs:
       # Step 4: Try to merge
       - name: Attempt merge
         run: |
+          # Switch to development branch
           git checkout development
           git pull origin development
-          if git merge --no-ff ${{ github.ref_name }}; then
-            echo "MERGE_SUCCESS=true" >> $env:GITHUB_ENV
-          else
-            echo "MERGE_SUCCESS=false" >> $env:GITHUB_ENV
-            git merge --abort
-          fi
+          
+          # Try to merge
+          git merge --no-ff ${{ github.ref_name }} || {
+            # If merge fails, check if it's due to conflicts
+            if git ls-files -u | grep -q '^'; then
+              echo "CONFLICT=true" >> $env:GITHUB_ENV
+              git merge --abort
+              exit 1
+            else
+              # If no conflicts but merge failed, it might be due to other reasons
+              echo "MERGE_ERROR=true" >> $env:GITHUB_ENV
+              git merge --abort
+              exit 1
+            fi
+          }
+          
+          # If we reach here, merge was successful
+          echo "MERGE_SUCCESS=true" >> $env:GITHUB_ENV
 
       # Step 5: Push if merge successful
       - name: Push merged code
@@ -62,10 +75,16 @@ jobs:
               -H "Content-Type: application/json" \
               -d '{"body": "✅ Successfully merged branch ${{ github.ref_name }} into development branch."}' \
               https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments
-          else
+          elif [ "${{ env.CONFLICT }}" == "true" ]; then
             # Send conflict message
             curl -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               -H "Content-Type: application/json" \
               -d '{"body": "❌ Merge conflict detected on branch ${{ github.ref_name }}. Please resolve conflicts and push again."}' \
+              https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments
+          else
+            # Send general error message
+            curl -X POST -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d '{"body": "⚠️ Merge failed on branch ${{ github.ref_name }}. Please check the workflow logs for details."}' \
               https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments
           fi
