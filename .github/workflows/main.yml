@@ -1,0 +1,79 @@
+name: Auto Merge Workflow
+
+on:
+  push:
+    branches:
+      - '**'  # Trigger this workflow for all branches
+
+permissions:
+  contents: write  # ✅ Required to allow push access using GITHUB_TOKEN
+
+jobs:
+  merge:
+    runs-on: windows-latest
+    steps:
+      # Step 1: Checkout the code
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history for better conflict detection
+
+      # Step 2: Set up Git
+      - name: Set up Git
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      # Step 3: Fetch all branches
+      - name: Fetch all branches
+        run: git fetch --all
+
+      # Step 4: Try to merge
+      - name: Attempt merge
+        run: |
+          git checkout development
+          git pull origin development
+          $branchName = "${{ github.ref_name }}"
+          git merge --no-ff $branchName
+          if ($LASTEXITCODE -eq 0) {
+            echo "MERGE_SUCCESS=true" >> $env:GITHUB_ENV
+          } else {
+            echo "MERGE_SUCCESS=false" >> $env:GITHUB_ENV
+            git merge --abort
+          }
+
+      # Step 5: Push if merge successful
+      - name: Push merged code
+        if: env.MERGE_SUCCESS == 'true'
+        run: |
+          git push origin development
+          echo "Successfully merged branch ${{ github.ref_name }} into development"
+
+  notify:
+    needs: merge
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Send notification
+        if: always()
+        run: |
+          if ($env:MERGE_SUCCESS -eq "true") {
+            $body = @{
+              body = "✅ Successfully merged branch ${{ github.ref_name }} into development branch."
+            } | ConvertTo-Json
+          } else {
+            $body = @{
+              body = "❌ Merge conflict detected on branch ${{ github.ref_name }}. Please resolve conflicts and push again."
+            } | ConvertTo-Json
+          }
+
+          Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" `
+            -Method Post `
+            -Headers @{
+              Authorization = "token ${{ secrets.GITHUB_TOKEN }}"
+              "Content-Type" = "application/json"
+            } `
+            -Body $body
+
